@@ -2,6 +2,16 @@ import numpy as np
 from scipy.linalg import expm
 import matplotlib.pyplot as plt
 
+RED = "#EB6231"
+YELLOW = "#E29D26"
+BLUE = "#5D80B4"
+LIGHTGREEN = "#6ABD9B"
+GREEN = "#8FB03E"
+
+
+def abs_sum(array):
+    return np.sum(np.abs(array))
+
 
 def nullspace(A, atol=1e-13, rtol=0):
     A = np.atleast_2d(A)
@@ -14,18 +24,16 @@ def nullspace(A, atol=1e-13, rtol=0):
 
 def equilibrium_frequencies(matrix):
     null_vec = nullspace(matrix.T)
-    frequencies = null_vec.T[0]
-    frequencies /= np.sum(frequencies)
-    assert np.sum(frequencies) - 1 < 1e-13, "The frequencies does not sum to 1"
-    assert np.sum(np.dot(frequencies, matrix)) < 1e-13, "The frequencies are not the nullspace of the transposed matrix"
-    assert np.sum(np.dot(frequencies, expm(matrix)) - frequencies) < 1e-10, "The frequencies are not stationary"
-    return frequencies
-
-
-def mutation_between_codon(_codon_origin, _codon_target):
-    assert len(_codon_origin) == len(_codon_target)
-    return [(nuc_origin, nuc_target) for nuc_origin, nuc_target in zip(_codon_origin, _codon_target) if
-            nuc_origin != nuc_target]
+    if null_vec.shape[0] != 61 and null_vec.shape[1] != 1:
+        "The null space is not of dimension 1"
+        return null_vec
+    else:
+        frequencies = null_vec.T[0]
+        frequencies /= np.sum(frequencies)
+        assert abs(np.sum(frequencies) - 1) < 1e-10, "The frequencies does not sum to 1"
+        assert abs_sum(np.dot(frequencies, matrix)) < 1e-10, "The frequencies are not the nullspace of the transposed matrix"
+        assert abs_sum(np.dot(frequencies, expm(matrix)) - frequencies) < 1e-10, "The frequencies are not stationary"
+        return frequencies
 
 
 nucleotides = "ACGT"
@@ -67,11 +75,11 @@ for codon in codons:
 assert len(aa_table) == 20, "There is not 20 amino-acids in the aa table"
 
 
-codon_preference = True
+codon_preference = False
 if codon_preference:
-    codon_preference = np.random.uniform(1, 2)
+    codon_preference = np.random.uniform(0, 2)
 
-sigma_2 = np.random.uniform(1, 4)
+sigma_2 = np.random.uniform(0, 4)
 assert 0 <= sigma_2 <= 4
 sigma = np.sqrt(sigma_2)
 fitness_aa = np.random.normal(loc=0, scale=sigma, size=len(amino_acids))
@@ -89,86 +97,105 @@ points = 50
 
 at_percent = np.zeros(points)
 at_obs_percent = np.zeros(points)
-gamma = np.zeros(points)
-gamma_n = np.zeros(points)
-gamma_s = np.zeros(points)
+gamma_ss = np.zeros(points)
+gamma_sw = np.zeros(points)
+gamma_ws = np.zeros(points)
+gamma_ww = np.zeros(points)
 mut_bias_range = np.logspace(-1, 1, points)
-for mut_bias_index, mut_bias in enumerate(mut_bias_range):
+for mut_bias_id, mut_bias in enumerate(mut_bias_range):
     mutation_matrix = np.array([[0, 1, 1, mut_bias],
                                 [mut_bias, 0, 1, mut_bias],
                                 [mut_bias, 1, 0, mut_bias],
                                 [mut_bias, 1, 1, 0]])
     mutation_matrix -= np.diagflat(np.sum(mutation_matrix, axis=1))
-    assert np.sum(mutation_matrix) < 1e-10, "The mutation matrix don't have the rows summing to 0"
+    assert abs(np.sum(mutation_matrix)) < 1e-10, "The mutation matrix don't have the rows summing to 0"
 
     nuc_frequencies = equilibrium_frequencies(mutation_matrix)
-    at_percent[mut_bias_index] = nuc_frequencies[nucleotides.find("A")] + nuc_frequencies[nucleotides.find("T")]
+    at_percent[mut_bias_id] = nuc_frequencies[nucleotides.find("A")] + nuc_frequencies[nucleotides.find("T")]
 
-    codon_matrix = np.zeros((len(codons), len(codons)))
-    for c_origin_index, codon_origin in enumerate(codons):
-        for c_target_index, codon_target in enumerate(codons):
-            mutations = mutation_between_codon(codon_origin, codon_target)
+    codon_sub_matrix = np.zeros((len(codons), len(codons)))
+    codon_mut_matrix = np.zeros((len(codons), len(codons)))
+
+    for c_origin_id, codon_origin in enumerate(codons):
+        for c_target_id, codon_target in enumerate(codons):
+            assert len(codon_origin) == len(codon_target)
+            mutations = [(n_from, n_to) for n_from, n_to in zip(codon_origin, codon_target) if n_from != n_to]
             if len(mutations) == 1:
                 nuc_origin, nuc_target = mutations[0]
-                n_origin_index = nucleotides.find(nuc_origin)
-                n_target_index = nucleotides.find(nuc_target)
-                sel_coef = fitness_codons[c_target_index] - fitness_codons[c_origin_index]
+                n_origin_id = nucleotides.find(nuc_origin)
+                n_target_id = nucleotides.find(nuc_target)
+                codon_mut_matrix[c_origin_id][c_target_id] = mutation_matrix[n_origin_id][n_target_id]
+                
+                sel_coef = fitness_codons[c_target_id] - fitness_codons[c_origin_id]
                 if abs(sel_coef) < 1e-10:
                     p_fix = 1
                 else:
                     p_fix = sel_coef / (1. - np.exp(-sel_coef))
-                codon_matrix[c_origin_index][c_target_index] = mutation_matrix[n_origin_index][n_target_index] * p_fix
 
-    codon_matrix -= np.diagflat(np.sum(codon_matrix, axis=1))
-    assert np.sum(codon_matrix) < 1e-10, "The codon matrix don't have the rows summing to 0"
+                codon_sub_matrix[c_origin_id][c_target_id] = mutation_matrix[n_origin_id][n_target_id] * p_fix
 
-    codon_frequencies = equilibrium_frequencies(codon_matrix)
+    codon_sub_matrix -= np.diagflat(np.sum(codon_sub_matrix, axis=1))
+    assert abs(np.sum(codon_sub_matrix)) < 1e-10, "The codon matrix don't have the rows summing to 0"
 
-    for codon_index, freq in enumerate(codon_frequencies):
-        at_obs_percent[mut_bias_index] += sum([freq/3 for nuc in codons[codon_index] if nuc == "A" or nuc == "T"])
+    codon_mut_matrix -= np.diagflat(np.sum(codon_mut_matrix, axis=1))
+    assert abs(np.sum(codon_mut_matrix)) < 1e-10, "The codon matrix don't have the rows summing to 0"
 
-    dn, dn0, ds, ds0 = 0, 0, 0, 0
-    for c_origin_index, codon_origin in enumerate(codons):
-        for c_target_index, codon_target in enumerate(codons):
-            mutations = mutation_between_codon(codon_origin, codon_target)
+    codon_frequencies = equilibrium_frequencies(codon_mut_matrix)
+    codon_frequencies *= np.exp(fitness_codons)
+    codon_frequencies /= np.sum(codon_frequencies)
+
+    codon_sub_frequencies = equilibrium_frequencies(codon_sub_matrix)
+    if isinstance(codon_sub_frequencies, np.ndarray):
+        assert abs_sum(codon_sub_frequencies - codon_frequencies) < 1e-8, "The codon frequencies do not match"
+
+    for codon_id, freq in enumerate(codon_frequencies):
+        at_obs_percent[mut_bias_id] += sum([freq/3 for nuc in codons[codon_id] if nuc == "A" or nuc == "T"])
+
+    dss, dss0, dsw, dsw0 = 0, 0, 0, 0
+    dww, dww0, dws, dws0 = 0, 0, 0, 0
+    for c_origin_id, codon_origin in enumerate(codons):
+        for c_target_id, codon_target in enumerate(codons):
+            mutations = [(n_from, n_to) for n_from, n_to in zip(codon_origin, codon_target) if n_from != n_to]
             if len(mutations) == 1:
                 nuc_origin, nuc_target = mutations[0]
-                n_origin_index = nucleotides.find(nuc_origin)
-                n_target_index = nucleotides.find(nuc_target)
-                d_partiel = codon_frequencies[c_origin_index] * codon_matrix[c_origin_index][c_target_index]
-                d0_partiel = codon_frequencies[c_origin_index] * mutation_matrix[n_origin_index][n_target_index]
-                if codontable[codon_origin] != codontable[codon_target]:
-                    dn += d_partiel
-                    dn0 += d0_partiel
+                d_partiel = codon_frequencies[c_origin_id] * codon_sub_matrix[c_origin_id][c_target_id]
+                d0_partiel = codon_frequencies[c_origin_id] * codon_mut_matrix[c_origin_id][c_target_id]
+                if nuc_origin == "A" or nuc_origin == "T":
+                    if nuc_target == "A" or nuc_target == "T":
+                        dww += d_partiel
+                        dww0 += d0_partiel
+                    else:
+                        dws += d_partiel
+                        dws0 += d0_partiel
                 else:
-                    ds += d_partiel
-                    ds0 += d0_partiel
-    d = dn + ds
-    d0 = dn0 + ds0
+                    if nuc_target == "A" or nuc_target == "T":
+                        dsw += d_partiel
+                        dsw0 += d0_partiel
+                    else:
+                        dss += d_partiel
+                        dss0 += d0_partiel
 
-    assert d != 0
-    assert d0 != 0
-    gamma[mut_bias_index] = d / d0
-    gamma_n[mut_bias_index] = dn / dn0
-    gamma_s[mut_bias_index] = ds / ds0
+    gamma_ss[mut_bias_id] = dss / dss0
+    gamma_sw[mut_bias_id] = dsw / dsw0
+    gamma_ws[mut_bias_id] = dws / dws0
+    gamma_ww[mut_bias_id] = dww / dww0
 
 
 plt.subplot(211)
-plt.plot(mut_bias_range, gamma, label='$\gamma$')
-plt.plot(mut_bias_range, gamma_n, label='$\gamma_N$')
-plt.plot(mut_bias_range, gamma_s, label='$\gamma_S$')
-plt.plot(mut_bias_range, gamma_n / gamma_s, label='$\gamma_N / \gamma_S$')
-plt.ylim((0, max(1, max(gamma_n / gamma_s))))
+plt.plot(mut_bias_range, gamma_ss, '--', label='$\gamma_{S \\rightarrow S}$')
+plt.plot(mut_bias_range, gamma_sw, '-', label='$\gamma_{S \\rightarrow W}$')
+plt.plot(mut_bias_range, gamma_ws, ':', label='$\gamma_{W \\rightarrow S}$')
+plt.plot(mut_bias_range, gamma_ww, '-.', label='$\gamma_{W \\rightarrow W}$')
 plt.xscale('log')
 plt.ylabel('$\gamma$')
 plt.title('Impact of mutational bias on $\gamma$ and %AT')
 plt.legend()
 
 plt.subplot(212)
-plt.plot(mut_bias_range, at_percent, label='%AT pred')
-plt.plot(mut_bias_range, at_obs_percent, label='%AT obs')
-plt.plot(mut_bias_range, 1 - at_percent, label='%GC pred')
-plt.plot(mut_bias_range, 1 - at_obs_percent, label='%GC obs')
+plt.plot(mut_bias_range, at_percent, '--', alpha=0.75, color=BLUE, label='%AT pred')
+plt.plot(mut_bias_range, at_obs_percent, color=BLUE, label='%AT obs')
+plt.plot(mut_bias_range, 1 - at_percent, '--', alpha=0.75, color=RED, label='%GC pred')
+plt.plot(mut_bias_range, 1 - at_obs_percent, color=RED, label='%GC obs')
 plt.xscale('log')
 plt.xlabel('$\lambda$')
 plt.ylabel('% nucleotides')
