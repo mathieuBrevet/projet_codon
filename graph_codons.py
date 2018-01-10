@@ -192,7 +192,7 @@ class Graph(object):
             res += str(edge) + " "
         return res
 
-nucleotides = ["A", "T", "G", "C"]
+nucleotides = ["A", "C", "G", "T"]
 codontable = {
     'ATA': 'I', 'ATC': 'I', 'ATT': 'I', 'ATG': 'M',
     'ACA': 'T', 'ACC': 'T', 'ACG': 'T', 'ACT': 'T',
@@ -223,11 +223,25 @@ for pos_1 in nucleotides:
         for pos_3 in nucleotides:
             codon_graph.add_vertex(pos_1 + pos_2 + pos_3)
 
+non_syn = 0
+syn = 0
+stop = 0
 for codon_ref in codon_graph.vertices():
     for codon_alt in codon_graph.vertices():
         if distance_str(codon_ref, codon_alt) == 1:
             codon_graph.add_edge((codon_ref, codon_alt))
+            if codontable[codon_ref] != "stop":
+                if codontable[codon_alt] == "stop":
+                    stop += 1
+                elif codontable[codon_alt] == codontable[codon_ref]:
+                    syn += 1
+                else:
+                    non_syn += 1
 
+tot = non_syn+stop+syn
+print("Non-synonymous mutation: {0}%".format(100*non_syn/tot))
+print("Synonymous mutation: {0}%".format(100*syn/tot))
+print("Stops mutation: {0}%".format(100*stop/tot))
 assert len(codon_graph.vertices()) == 64
 assert len(codon_graph.edges()) == 64*9//2
 assert len(codon_graph.biggest_component_spanning_tree()) == 64 - 1
