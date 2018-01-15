@@ -50,25 +50,6 @@ for codon in codons:
     aa_table[aa].append(codons.index(codon))
 assert len(aa_table) == 21, "There is not 21 amino-acids in the aa table"
 
-
-codon_preference = False
-if codon_preference:
-    codon_preference = np.random.uniform(0, 2)
-
-sigma_2 = np.random.uniform(0, 4)
-assert 0 <= sigma_2 <= 4
-sigma = np.sqrt(sigma_2)
-fitness_aa = np.random.normal(loc=0, scale=sigma, size=len(amino_acids))
-fitness_codons = np.zeros(len(codons))
-
-for aa, codon_list in aa_table.items():
-    prefered = np.random.choice(codon_list)
-    fitness_codon = fitness_aa[amino_acids.find(aa)]
-    fitness_codons[prefered] = fitness_codon + codon_preference
-    for codon in codon_list:
-        if codon != prefered:
-            fitness_codons[codon] = fitness_codon - codon_preference
-
 fitness_codons = nbr_weak*nbr_weak
 
 points = 50
