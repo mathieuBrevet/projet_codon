@@ -56,15 +56,20 @@ codontable = {
     'TGC': 'C', 'TGT': 'C', 'TGA': 'X', 'TGG': 'W'}
 assert len(codontable.keys()) == 64, "There is not 64 codons in the codon table"
 
-codons = [c for c, aa in codontable.items() if aa != 'X']
-assert len(codons) == 61, "There is not 3 stop codons in the codon table"
+codons = list(codontable.keys())
+assert len(codons) == 64, "There is not 3 stop codons in the codon table"
 assert not [n for n in "".join(codons) if (n not in nucleotides)], "There is a codon with an unrecognized nucleotide"
+
+nbr_weak = np.array([c.count("A") + c.count("T") for c in codons])
+z_ww = nbr_weak
+z_ws = 2 * nbr_weak
+z_sw = 2 * (3 - nbr_weak)
+z_ss = 3 - nbr_weak
 
 amino_acids_set = set(codontable.values())
 amino_acids_set.remove('X')
-amino_acids = "".join(amino_acids_set)
-assert len(amino_acids) == 20, "There is not 20 amino-acids in the codon table"
-
+amino_acids = "".join(amino_acids_set) + "X"
+assert len(amino_acids) == 21, "There is not 20 amino-acids in the codon table"
 
 aa_table = {}
 for codon in codons:
@@ -72,7 +77,7 @@ for codon in codons:
     if aa not in aa_table:
         aa_table[aa] = []
     aa_table[aa].append(codons.index(codon))
-assert len(aa_table) == 20, "There is not 20 amino-acids in the aa table"
+assert len(aa_table) == 21, "There is not 20 amino-acids in the aa table"
 
 
 codon_preference = False
@@ -93,14 +98,16 @@ for aa, codon_list in aa_table.items():
         if codon != prefered:
             fitness_codons[codon] = fitness_codon - codon_preference
 
+fitness_codons = nbr_weak*nbr_weak
+
 points = 50
 
-at_percent = np.zeros(points)
-at_obs_percent = np.zeros(points)
+mut_bias_obs = np.zeros(points)
 gamma_ss = np.zeros(points)
 gamma_sw = np.zeros(points)
 gamma_ws = np.zeros(points)
 gamma_ww = np.zeros(points)
+
 mut_bias_range = np.logspace(-1, 1, points)
 for mut_bias_id, mut_bias in enumerate(mut_bias_range):
     mutation_matrix = np.array([[0, 1, 1, mut_bias],
@@ -109,9 +116,6 @@ for mut_bias_id, mut_bias in enumerate(mut_bias_range):
                                 [mut_bias, 1, 1, 0]])
     mutation_matrix -= np.diagflat(np.sum(mutation_matrix, axis=1))
     assert abs(np.sum(mutation_matrix)) < 1e-10, "The mutation matrix don't have the rows summing to 0"
-
-    nuc_frequencies = equilibrium_frequencies(mutation_matrix)
-    at_percent[mut_bias_id] = nuc_frequencies[nucleotides.find("A")] + nuc_frequencies[nucleotides.find("T")]
 
     codon_sub_matrix = np.zeros((len(codons), len(codons)))
     codon_mut_matrix = np.zeros((len(codons), len(codons)))
@@ -140,7 +144,7 @@ for mut_bias_id, mut_bias in enumerate(mut_bias_range):
     codon_mut_matrix -= np.diagflat(np.sum(codon_mut_matrix, axis=1))
     assert abs(np.sum(codon_mut_matrix)) < 1e-10, "The codon matrix don't have the rows summing to 0"
 
-    codon_frequencies = equilibrium_frequencies(codon_mut_matrix)
+    codon_frequencies = np.power(mut_bias, nbr_weak)
     codon_frequencies *= np.exp(fitness_codons)
     codon_frequencies /= np.sum(codon_frequencies)
 
@@ -148,8 +152,7 @@ for mut_bias_id, mut_bias in enumerate(mut_bias_range):
     if isinstance(codon_sub_frequencies, np.ndarray):
         assert abs_sum(codon_sub_frequencies - codon_frequencies) < 1e-8, "The codon frequencies do not match"
 
-    for codon_id, freq in enumerate(codon_frequencies):
-        at_obs_percent[mut_bias_id] += sum([freq/3 for nuc in codons[codon_id] if nuc == "A" or nuc == "T"])
+    mut_bias_obs[mut_bias_id] = sum(codon_frequencies * z_ws) / sum(codon_frequencies * z_sw)
 
     dss, dss0, dsw, dsw0 = 0, 0, 0, 0
     dww, dww0, dws, dws0 = 0, 0, 0, 0
@@ -182,22 +185,23 @@ for mut_bias_id, mut_bias in enumerate(mut_bias_range):
 
 
 plt.subplot(211)
-plt.plot(mut_bias_range, gamma_ss, '--', label='$\gamma_{S \\rightarrow S}$')
-plt.plot(mut_bias_range, gamma_sw, '-', label='$\gamma_{S \\rightarrow W}$')
-plt.plot(mut_bias_range, gamma_ws, ':', label='$\gamma_{W \\rightarrow S}$')
-plt.plot(mut_bias_range, gamma_ww, '-.', label='$\gamma_{W \\rightarrow W}$')
+plt.plot(mut_bias_range, gamma_ws/gamma_sw, '-',
+         label='$\gamma_{w \\rightarrow s}/\gamma_{s \\rightarrow w}$')
+plt.plot(mut_bias_range, mut_bias_range/mut_bias_obs, ':',
+         label='$\lambda / \lambda_{obs}$')
+plt.plot(mut_bias_range, np.ones(len(mut_bias_range)), color="black")
 plt.xscale('log')
+plt.ylim((0, max(mut_bias_range/mut_bias_obs)*1.5))
+
 plt.ylabel('$\gamma$')
-plt.title('Impact of mutational bias on $\gamma$ and %AT')
 plt.legend()
 
 plt.subplot(212)
-plt.plot(mut_bias_range, at_percent, '--', alpha=0.75, color=BLUE, label='%AT pred')
-plt.plot(mut_bias_range, at_obs_percent, color=BLUE, label='%AT obs')
-plt.plot(mut_bias_range, 1 - at_percent, '--', alpha=0.75, color=RED, label='%GC pred')
-plt.plot(mut_bias_range, 1 - at_obs_percent, color=RED, label='%GC obs')
+plt.plot(mut_bias_range, mut_bias_range, alpha=0.75, label='$\lambda$')
+plt.plot(mut_bias_range, mut_bias_obs, '--', label='$\lambda_{obs}$')
 plt.xscale('log')
+plt.yscale('log')
 plt.xlabel('$\lambda$')
-plt.ylabel('% nucleotides')
+plt.ylabel('$\lambda_{obs}$')
 plt.legend()
 plt.show()
